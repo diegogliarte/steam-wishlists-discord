@@ -21,11 +21,8 @@ WISHLIST_ENDPOINT = (
     "https://partner.steam-api.com/"
     "IPartnerFinancialsService/GetAppWishlistReporting/v001/"
 )
-APP_LIST_ENDPOINT = (
-    "https://partner.steam-api.com/"
-    "IStoreService/GetAppList/v1/"
-)
-USER_AGENT = "steam-wishlists-discord/1.2"
+APP_DETAILS_ENDPOINT = "https://store.steampowered.com/api/appdetails"
+USER_AGENT = "steam-wishlists-discord/1.3"
 EMBED_COLOR = 0x9471ED
 
 
@@ -100,38 +97,20 @@ def steam_day(api_key: str, app_id: int, day: date) -> dict[str, Any]:
     return data.get("response", {})
 
 
-def steam_app_name(api_key: str, app_id: int, state: dict[str, Any]) -> str:
-    """Fetch the app name from Steam, falling back to the last cached name."""
-    input_json = json.dumps(
-        {
-            "last_appid": max(app_id - 1, 0),
-            "max_results": 10,
-            "include_games": True,
-        },
-        separators=(",", ":"),
-    )
-    query = urlencode({"key": api_key, "input_json": input_json})
+def steam_app_name(app_id: int, state: dict[str, Any]) -> str:
+    """Fetch the public Steam Store name, falling back to the cached name."""
+    query = urlencode({"appids": app_id, "l": "english"})
 
     try:
-        data = http_json(f"{APP_LIST_ENDPOINT}?{query}")
-        response = data.get("response", {})
-        apps = response.get("apps", [])
-
-        # Keep this tolerant of alternate Steam response wrappers.
-        if isinstance(apps, dict):
-            apps = apps.get("app", apps.get("apps", []))
-        if not isinstance(apps, list):
-            apps = []
-
-        for app in apps:
-            if not isinstance(app, dict):
-                continue
-            if int(app.get("appid", -1)) != app_id:
-                continue
-            name = str(app.get("name") or app.get("app_name") or "").strip()
-            if name:
-                state["app_name"] = name
-                return name
+        data = http_json(f"{APP_DETAILS_ENDPOINT}?{query}")
+        app = data.get(str(app_id), {})
+        if isinstance(app, dict) and app.get("success"):
+            details = app.get("data", {})
+            if isinstance(details, dict):
+                name = str(details.get("name", "")).strip()
+                if name:
+                    state["app_name"] = name
+                    return name
     except (RuntimeError, ValueError, TypeError) as exc:
         print(f"Could not refresh app name: {exc}", file=sys.stderr)
 
@@ -139,7 +118,7 @@ def steam_app_name(api_key: str, app_id: int, state: dict[str, Any]) -> str:
     if cached_name:
         return cached_name
 
-    raise RuntimeError(f"Steam did not return a name for AppID {app_id}.")
+    raise RuntimeError(f"Steam Store did not return a name for AppID {app_id}.")
 
 
 def normalize_day(response: dict[str, Any]) -> dict[str, int] | None:
@@ -378,7 +357,7 @@ def main() -> int:
     try:
         api_key, app_id, webhook_url = read_config()
         state = load_json(STATE_PATH, {"days": {}})
-        app_name = steam_app_name(api_key, app_id, state)
+        app_name = steam_app_name(app_id, state)
         print(f"App: {app_name} ({app_id})")
         update_cache(api_key, app_id, state)
         update_discord(webhook_url, state, app_id, app_name)
