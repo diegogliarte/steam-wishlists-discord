@@ -1,6 +1,6 @@
 # Steam Wishlists Discord
 
-Keeps one Discord message updated with your total Steam wishlists and the last 7 days of changes.
+Keeps one Discord message updated with your Steam wishlist total, 7-day change and 30-day change.
 
 ## Install
 
@@ -12,7 +12,7 @@ nano .env
 python3 wishlists_bot.py
 ```
 
-Runs automatically every hour with cron.
+The game name is fetched automatically from Steam. Runs every hour with cron.
 
 ## Update
 

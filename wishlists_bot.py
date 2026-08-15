@@ -17,12 +17,16 @@ from urllib.request import Request, urlopen
 ROOT = Path(__file__).resolve().parent
 ENV_PATH = ROOT / ".env"
 STATE_PATH = ROOT / "state.json"
-STEAM_ENDPOINT = (
+WISHLIST_ENDPOINT = (
     "https://partner.steam-api.com/"
     "IPartnerFinancialsService/GetAppWishlistReporting/v001/"
 )
-USER_AGENT = "steam-wishlist-discord/1.1"
-EMBED_COLOR = 0x1B2838
+APP_LIST_ENDPOINT = (
+    "https://partner.steam-api.com/"
+    "IStoreService/GetAppList/v1/"
+)
+USER_AGENT = "steam-wishlists-discord/1.2"
+EMBED_COLOR = 0x9471ED
 
 
 def load_dotenv(path: Path) -> None:
@@ -92,8 +96,50 @@ def http_json(
 
 def steam_day(api_key: str, app_id: int, day: date) -> dict[str, Any]:
     query = urlencode({"key": api_key, "appid": app_id, "date": day.isoformat()})
-    data = http_json(f"{STEAM_ENDPOINT}?{query}")
+    data = http_json(f"{WISHLIST_ENDPOINT}?{query}")
     return data.get("response", {})
+
+
+def steam_app_name(api_key: str, app_id: int, state: dict[str, Any]) -> str:
+    """Fetch the app name from Steam, falling back to the last cached name."""
+    input_json = json.dumps(
+        {
+            "last_appid": max(app_id - 1, 0),
+            "max_results": 10,
+            "include_games": True,
+        },
+        separators=(",", ":"),
+    )
+    query = urlencode({"key": api_key, "input_json": input_json})
+
+    try:
+        data = http_json(f"{APP_LIST_ENDPOINT}?{query}")
+        response = data.get("response", {})
+        apps = response.get("apps", [])
+
+        # Keep this tolerant of alternate Steam response wrappers.
+        if isinstance(apps, dict):
+            apps = apps.get("app", apps.get("apps", []))
+        if not isinstance(apps, list):
+            apps = []
+
+        for app in apps:
+            if not isinstance(app, dict):
+                continue
+            if int(app.get("appid", -1)) != app_id:
+                continue
+            name = str(app.get("name") or app.get("app_name") or "").strip()
+            if name:
+                state["app_name"] = name
+                return name
+    except (RuntimeError, ValueError, TypeError) as exc:
+        print(f"Could not refresh app name: {exc}", file=sys.stderr)
+
+    cached_name = str(state.get("app_name", "")).strip()
+    if cached_name:
+        return cached_name
+
+    raise RuntimeError(f"Steam did not return a name for AppID {app_id}.")
 
 
 def normalize_day(response: dict[str, Any]) -> dict[str, int] | None:
@@ -173,7 +219,18 @@ def signed(value: int) -> str:
     return f"{value:+,d}"
 
 
-def build_embed(state: dict[str, Any]) -> dict[str, Any]:
+def period_change(
+    days: dict[str, dict[str, int]],
+    latest: date,
+    count: int,
+) -> int:
+    return sum(
+        net_change(days.get((latest - timedelta(days=i)).isoformat(), {}))
+        for i in range(count)
+    )
+
+
+def build_embed(state: dict[str, Any], app_id: int, app_name: str) -> dict[str, Any]:
     days: dict[str, dict[str, int]] = state.get("days", {})
     if not days:
         raise RuntimeError("No wishlist data is cached yet.")
@@ -181,21 +238,26 @@ def build_embed(state: dict[str, Any]) -> dict[str, Any]:
     ordered_dates = sorted(days)
     latest = parse_iso_day(ordered_dates[-1])
     total = sum(net_change(stats) for stats in days.values())
+    seven_day_total = period_change(days, latest, 7)
+    thirty_day_total = period_change(days, latest, 30)
 
-    recent_dates = [latest - timedelta(days=i) for i in range(6, -1, -1)]
+    # Latest available Steam day first, then -1 day, -2 days, etc.
     recent = [
-        (day, net_change(days.get(day.isoformat(), {})))
-        for day in recent_dates
+        (
+            latest - timedelta(days=i),
+            net_change(days.get((latest - timedelta(days=i)).isoformat(), {})),
+        )
+        for i in range(7)
     ]
-    seven_day_total = sum(value for _, value in recent)
-
     daily_lines = [
         f"{day.strftime('%b %d'):<8}{signed(value):>8}"
         for day, value in recent
     ]
 
     return {
-        "title": "Steam Wishlists",
+        "title": app_name,
+        "url": f"https://store.steampowered.com/app/{app_id}/",
+        "description": "Steam wishlist overview",
         "color": EMBED_COLOR,
         "fields": [
             {
@@ -206,6 +268,11 @@ def build_embed(state: dict[str, Any]) -> dict[str, Any]:
             {
                 "name": "Last 7 days",
                 "value": f"**{signed(seven_day_total)}**",
+                "inline": True,
+            },
+            {
+                "name": "Last 30 days",
+                "value": f"**{signed(thirty_day_total)}**",
                 "inline": True,
             },
             {
@@ -245,8 +312,13 @@ def edit_discord_message(
     http_json(url, method="PATCH", payload=payload)
 
 
-def update_discord(webhook_url: str, state: dict[str, Any]) -> None:
-    payload = discord_payload(build_embed(state))
+def update_discord(
+    webhook_url: str,
+    state: dict[str, Any],
+    app_id: int,
+    app_name: str,
+) -> None:
+    payload = discord_payload(build_embed(state, app_id, app_name))
     message_id = state.get("discord_message_id")
 
     if message_id:
@@ -306,8 +378,10 @@ def main() -> int:
     try:
         api_key, app_id, webhook_url = read_config()
         state = load_json(STATE_PATH, {"days": {}})
+        app_name = steam_app_name(api_key, app_id, state)
+        print(f"App: {app_name} ({app_id})")
         update_cache(api_key, app_id, state)
-        update_discord(webhook_url, state)
+        update_discord(webhook_url, state, app_id, app_name)
         save_json(STATE_PATH, state)
         return 0
     except (ValueError, RuntimeError, json.JSONDecodeError) as exc:
