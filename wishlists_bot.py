@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Keep one Discord webhook message updated with Steam wishlist stats."""
+"""Keep one Discord webhook message updated with Steam wishlists stats."""
 
 from __future__ import annotations
 
@@ -21,7 +21,7 @@ STEAM_ENDPOINT = (
     "https://partner.steam-api.com/"
     "IPartnerFinancialsService/GetAppWishlistReporting/v001/"
 )
-USER_AGENT = "steam-wishlist-discord/1.1"
+USER_AGENT = "steam-wishlists-discord/1.1"
 EMBED_COLOR = 0x1B2838
 
 

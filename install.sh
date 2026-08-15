@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-APP_NAME="steam-wishlist-discord"
+APP_NAME="steam-wishlists-discord"
 INSTALL_DIR="${INSTALL_DIR:-/opt/$APP_NAME}"
 SOURCE_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 
@@ -30,7 +30,7 @@ fi
 
 install -d -m 0755 -o "$RUN_USER" -g "$RUN_GROUP" "$INSTALL_DIR"
 install -m 0755 -o "$RUN_USER" -g "$RUN_GROUP" \
-  "$SOURCE_DIR/wishlist_bot.py" "$INSTALL_DIR/wishlist_bot.py"
+  "$SOURCE_DIR/wishlists_bot.py" "$INSTALL_DIR/wishlists_bot.py"
 install -m 0644 -o "$RUN_USER" -g "$RUN_GROUP" \
   "$SOURCE_DIR/.env.example" "$INSTALL_DIR/.env.example"
 
@@ -49,11 +49,11 @@ cat > "$CRON_FILE" <<EOF_CRON
 SHELL=/bin/bash
 PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 
-0 * * * * $RUN_USER cd $INSTALL_DIR && $PYTHON wishlist_bot.py >> wishlist.log 2>&1
+0 * * * * $RUN_USER cd $INSTALL_DIR && $PYTHON wishlists_bot.py >> wishlists.log 2>&1
 EOF_CRON
 chmod 0644 "$CRON_FILE"
 
-"$PYTHON" -m py_compile "$INSTALL_DIR/wishlist_bot.py"
+"$PYTHON" -m py_compile "$INSTALL_DIR/wishlists_bot.py"
 rm -rf "$INSTALL_DIR/__pycache__"
 
 echo "Installed to $INSTALL_DIR"
@@ -61,7 +61,7 @@ echo "Hourly cron installed at $CRON_FILE"
 
 if [[ $CREATED_ENV -eq 1 ]]; then
   echo "Edit $INSTALL_DIR/.env, then run:"
-  echo "  $PYTHON $INSTALL_DIR/wishlist_bot.py"
+  echo "  $PYTHON $INSTALL_DIR/wishlists_bot.py"
 else
   echo "Existing .env preserved."
 fi
